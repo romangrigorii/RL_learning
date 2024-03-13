@@ -65,13 +65,13 @@ if 0: # training the model
     validation_data=(test_images, to_categorical(test_labels)),
     )
 
-    model.save_weights(os.path.join(os.getcwd(), 'cnn_keras_example_.weights.h5'))
+    model.save_weights(os.path.join(os.getcwd(), 'cnn_keras_weights/cnn_keras_example_.weights.h5'))
 
 
 
 else: # exercizing the model
 
-    model.load_weights('cnn_keras_example_.weights.h5')
+    model.load_weights('cnn_keras_weights/cnn_keras_example_.weights.h5')
     predictions = model.predict(test_images[:20])
     print(np.argmax(predictions, axis = 1))
     print(test_labels[:20])

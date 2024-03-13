@@ -12,13 +12,13 @@ num_actions = env.action_space.n
 env.action_space.seed(42)
 observation, info = env.reset(seed=42)
 
-# we are setting up a minual model in order to explicitly defien the feed forward/backward steps
+# we are setting up a manual model in order to explicitly defien the feed forward/backward steps
 class DQN(tf.keras.Model):
   """Dense neural network class."""
   def __init__(self):
     super(DQN, self).__init__()
-    self.dense1 = tf.keras.layers.Dense(8, activation="relu")
-    self.dense2 = tf.keras.layers.Dense(8, activation="relu")
+    self.dense1 = tf.keras.layers.Dense(16, activation="relu")
+    self.dense2 = tf.keras.layers.Dense(16, activation="relu")
     self.dense3 = tf.keras.layers.Dense(num_actions, dtype=tf.float32) # No activation
     
   def call(self, x):
@@ -29,10 +29,9 @@ class DQN(tf.keras.Model):
 
 main_nn = DQN()
 target_nn = DQN()
-main_nn.load_weights('cnn_keras_example_.weights.h5')
-target_nn.load_weights('cnn_keras_example_.weights.h5')
+# main_nn.load_weights('dqn_example.weights.h5')
+# target_nn.load_weights('dqn_example.weights.h5')
 
-target_nn.save_weights(os.path.join(os.getcwd(), 'dqn_example.weights.h5'))
 optimizer = tf.keras.optimizers.Adam(1e-4)
 mse = tf.keras.losses.MeanSquaredError()
 discount = 0.99
@@ -99,7 +98,7 @@ def select_epsilon_greedy_action(state, epsilon):
 
 def main():
     num_episodes = 1000
-    epsilon = 0.0
+    epsilon = 0.5
     batch_size = 128
     cur_frame = 0    
     last_100_ep_rewards = []
@@ -116,6 +115,7 @@ def main():
             #print(env.step(action))
             next_state, reward, done, truncated, info = env.step(action) # every simulation step we are rewarded
             #reward = iters*iters
+            if done: reward = 0 # make the system not desire wanting to finish
             ep_reward += reward*reward
             # Save to experience replay.
             buffer.add(state, action, ep_reward, next_state, done)
