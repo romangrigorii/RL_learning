@@ -83,7 +83,7 @@ def train_step(states, actions, rewards, next_states, dones):
         qs = main_nn(states)
         action_masks = tf.one_hot(actions, num_actions) # converts to 32 x 2 
         masked_qs = tf.reduce_sum(action_masks * qs, axis=-1)
-        loss = mse(target, tf.reduce_max(qs, axis=-1))
+        loss = mse(target, tf.reduce_max(masked_qs, axis=-1))
     grads = tape.gradient(loss, main_nn.trainable_variables)
     optimizer.apply_gradients(zip(grads, main_nn.trainable_variables))
     return loss
