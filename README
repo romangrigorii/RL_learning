@@ -1,0 +1,12 @@
+cnn_keras_example.py  - - - this is a file I used to set up a few cnn NNs to practice the design of such networks
+/cnn_keras_weights contains the weights from the networks set up in cnn_keras_example.py
+
+dqn_example.py - - - contains the RF code. It is set up to just run from the get go.  Alot of the code came from https://markelsanz14.medium.com/introduction-to-reinforcement-learning-part-3-q-learning-with-neural-networks-algorithm-dqn-1e22ee928ecd
+but a modified a bit to get it to work (the code fro the ink didn't work as well for me. I think this points to a brittle nature of DQN rather than the og code)
+dqn_example.weights.h5 has the concurrent saved weights. If you don't want to love these weights and start from scratch, comment out main_nn.load_weights('cnn_keras_example_.weights.h5') and target_nn.load_weights('cnn_keras_example_.weights.h5') and set 
+epsiolon to .5
+
+grid world is a very basic example of the Q-learning algorithm. I would say it's worth starting there if you are just getting into this.
+multi-armed-bandid.py is an intermediate level Q-learning examaple. Also recommend looking through it.
+
+racetrack_learning.py  is the project in progress which I want to get working! 
