@@ -6,7 +6,7 @@ import tensorflow as tf
 import numpy as np
 import os
 
-env = gym.make("CartPole-v1", render_mode="human")
+env = gym.make("CartPole-v0", render_mode="human")
 num_features = env.observation_space.shape[0]
 num_actions = env.action_space.n
 env.action_space.seed(42)

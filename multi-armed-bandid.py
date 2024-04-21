@@ -23,7 +23,7 @@ def take_epsilon_greedy_action(epsilon, average_rewards):
 # Probability of success of each bandit
 bandits = [0.1, 0.3, 0.05, 0.55, 0.4]
 num_iterations = 10000
-epsilon = 0.7
+epsilon = 0.05
 
 # Store info to know which one is the best action in each moment
 total_rewards = [0 for _ in range(len(bandits))]

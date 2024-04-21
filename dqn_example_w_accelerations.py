@@ -114,13 +114,9 @@ def main():
         ep_reward, done, iters = 0, False, 0
         while not done:
             iters +=1
-            #print(state)
             action = select_epsilon_greedy_action(state, epsilon)            
-            #print(env.step(action))
             next_state, reward, done, truncated, info = env.step(action) # every simulation step we are rewarded
-            #reward = iters*iters
-            if done: reward = 0 # make the system not desire wanting to finish
-            ep_reward += reward*reward
+            reward*=reward
             # Save to experience replay.
             next_state = np.concatenate((next_state[:2], [next_state[1]-state[1]], next_state[2:], [next_state[3]-state[4]]))
             buffer.add(state, action, ep_reward, next_state, done)
