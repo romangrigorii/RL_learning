@@ -1,5 +1,7 @@
 # The example followed here came from https://markelsanz14.medium.com/introduction-to-reinforcement-learning-part-3-q-learning-with-neural-networks-algorithm-dqn-1e22ee928ecd
-
+# 
+# 
+# The state space of the cart is: [x pos of vart, x velocity of cart, angle of bar, angular vel of bar]
 import gym
 from collections import deque
 import tensorflow as tf
@@ -12,7 +14,7 @@ import io
 import os
 
 env = gym.make('CartPole-v0', render_mode="human")
-num_features = env.observation_space.shape[0] + 2
+num_features = env.observation_space.shape[0]
 num_actions = env.action_space.n
 print('Number of state features: {}'.format(num_features))
 print('Number of possible actions: {}'.format(num_actions))
@@ -22,8 +24,8 @@ class DQN(tf.keras.Model):
   """Dense neural network class."""
   def __init__(self):
     super(DQN, self).__init__()
-    self.dense1 = tf.keras.layers.Dense(32, activation="relu")
-    self.dense2 = tf.keras.layers.Dense(32, activation="relu")
+    self.dense1 = tf.keras.layers.Dense(128, activation="relu")
+    self.dense2 = tf.keras.layers.Dense(128, activation="relu")
     self.dense3 = tf.keras.layers.Dense(num_actions, dtype=tf.float32) # No activation
     
   def call(self, x):
@@ -32,21 +34,19 @@ class DQN(tf.keras.Model):
     x = self.dense2(x)
     return self.dense3(x)
 
-main_nn = DQN()
-target_nn = DQN()
-global epsilon, epsilon_step
-
 class HyperParams():
+  main_nn = DQN()
+  target_nn = DQN()
   if 0: # set to 0 if you want to load fresh weights. WRANING, the saved weights will be overwritten
-    main_nn.load_weights('dqn_example_original_w_accelerations.weights.h5')
-    target_nn.load_weights('dqn_example_original_w_accelerations.weights.h5')
-    print("Saved weights loaded")
+    main_nn.load_weights('dqn_example_original.weights.h5')
+    target_nn.load_weights('dqn_example_original.weights.h5')
+    # print("Saved weights loaded")
     epsilon = .1
     epsilon_step = 0
   else:
     print("Using random weights")
     epsilon = 1
-    epsilon_step = .001
+    epsilon_step = .0009
   batch_size = 128
 
 optimizer = tf.keras.optimizers.Adam(1e-4)
@@ -74,7 +74,7 @@ class ReplayBuffer(object):
       rewards.append(reward)
       next_states.append(np.array(next_state, copy=False))
       dones.append(done)
-    states = np.array(states, dtype="object")
+    states = np.array(states)
     actions = np.array(actions)
     rewards = np.array(rewards, dtype=np.float32)
     next_states = np.array(next_states)
@@ -84,29 +84,29 @@ class ReplayBuffer(object):
 discount = 0.99
 
 @tf.function
-def train_step(states, actions, rewards, next_states, dones):
+def train_step(states, actions, rewards, next_states, dones, hp):
   """Perform a training iteration on a batch of data sampled from the experience
   replay buffer."""
   # Calculate targets.
-  next_qs = target_nn(next_states)
+  next_qs = hp.target_nn(next_states)
   max_next_qs = tf.reduce_max(next_qs, axis=-1)
   target = rewards + (1. - dones) * discount * max_next_qs
   with tf.GradientTape() as tape:
-    qs = main_nn(states)
+    qs = hp.main_nn(states)
     action_masks = tf.one_hot(actions, num_actions)
     masked_qs = tf.reduce_sum(action_masks * qs, axis=-1)
     loss = mse(target, masked_qs)
-  grads = tape.gradient(loss, main_nn.trainable_variables)
-  optimizer.apply_gradients(zip(grads, main_nn.trainable_variables))
+  grads = tape.gradient(loss, hp.main_nn.trainable_variables)
+  optimizer.apply_gradients(zip(grads, hp.main_nn.trainable_variables))
   return loss
 
-def select_epsilon_greedy_action(state, epsilon):
+def select_epsilon_greedy_action(state, hp):
   """Take random action with probability epsilon, else take best action."""
   result = tf.random.uniform((1,))
-  if result < epsilon:
+  if result < hp.epsilon:
     return env.action_space.sample() # Random action (left or right).
   else:
-    return tf.argmax(main_nn(state)[0]).numpy() # Greedy action for state.
+    return tf.argmax(hp.main_nn(state)[0]).numpy() # Greedy action for state.
 
 def main():
   num_episodes = 1000    
@@ -120,24 +120,22 @@ def main():
     ep_reward, done = 0, False
     while not done:
       state_in = tf.expand_dims(state, axis=0)
-      action = select_epsilon_greedy_action(state_in, hp.epsilon)
+      action = select_epsilon_greedy_action(state_in, hp)
       q = env.step(action)
       next_state, reward, done, _ , _  = env.step(action)
       ep_reward += reward
-      next_state = np.concatenate((next_state[:2], [next_state[1]-state[1]], next_state[2:], [next_state[3]-state[3]])) # adding acceleration 
-      print(next_state)
       # Save to experience replay.
       buffer.add(state, action, reward, next_state, done)
       state = next_state
       cur_frame += 1
       # Copy main_nn weights to target_nn.
       if cur_frame % 2000 == 0:
-        target_nn.set_weights(main_nn.get_weights())
+        hp.target_nn.set_weights(hp.main_nn.get_weights())
 
       # Train neural network.
       if len(buffer) >= hp.batch_size:
         states, actions, rewards, next_states, dones = buffer.sample(hp.batch_size)
-        loss = train_step(states, actions, rewards, next_states, dones)
+        loss = train_step(states, actions, rewards, next_states, dones, hp)
     
     if episode < 950:
       hp.epsilon -= hp.epsilon_step
@@ -146,10 +144,10 @@ def main():
       last_100_ep_rewards = last_100_ep_rewards[1:]
     last_100_ep_rewards.append(ep_reward)
       
-    if episode % 50 == 0:
+    if episode % 50 == 0 and episode>0:
       print(f'Episode {episode}/{num_episodes}. Epsilon: {hp.epsilon:.3f}. '
             f'Reward in last 100 episodes: {np.mean(last_100_ep_rewards):.3f}')
-      target_nn.save_weights(os.path.join(os.getcwd(), 'dqn_example_w_accelerations.weights.h5'))
+      hp.main_nn.save_weights(os.path.join(os.getcwd(), 'dqn_example_original.weights.h5'))
   env.close()
 
 
