@@ -35,8 +35,8 @@ class DQN(tf.keras.Model):
 
 class HyperParams():
   use_saved_model = True # note that new data will be saved only when we don't use a saved model
-  save_weights = not use_saved_model
-  model_name = 'cart_balancing_model_128_128_m.keras'  
+  save_weights = True # not use_saved_model
+  model_name = 'cart_balancing_model_128_128_q.keras'  
   num_iters = 10000
   epslion_convergence_steps = 1000
   epsilon_min = .1 # the minimum epsilon that system will use after epslion_convergence_steps sim runs
@@ -63,9 +63,9 @@ class ReplayBuffer(object):
     self.buffer = deque(maxlen=size)
 
   def add(self, state, action, reward, next_state, done):
-    #q = bisect.bisect_right(self.buffer,reward, key=lambda x: x[2])
-    #self.buffer.insert(q, (state, action, reward, next_state, done))
-    self.buffer.append((state, action, reward, next_state, done))
+    # q = bisect.bisect_right(self.buffer,reward, key=lambda x: x[2])
+    # self.buffer.insert(q, (state, action, reward, next_state, done))
+    self.buffer.append((state, action, reward, next_state, done)) # add a tuple of data to the buffer 
 
   def __len__(self):
     return len(self.buffer)
@@ -98,17 +98,17 @@ def train_step(states, actions, rewards, next_states, dones, hp):
   """Perform a training iteration on a batch of data sampled from the experience
   replay buffer."""
   # Calculate targets.
-  next_qs = hp.target_nn(next_states)
-  max_next_qs = tf.reduce_max(next_qs, axis=-1)
-  target = rewards + (1. - dones) * discount * max_next_qs
-  with tf.GradientTape() as tape:
-    qs = hp.main_nn(states)
-    action_masks = tf.one_hot(actions, num_actions)
-    masked_qs = tf.reduce_sum(action_masks * qs, axis=-1)
-    loss = mse(target, masked_qs)
-  grads = tape.gradient(loss, hp.main_nn.trainable_variables)
-  optimizer.apply_gradients(zip(grads, hp.main_nn.trainable_variables))
-  return loss
+  next_qs = hp.target_nn(next_states)                       # get the 2 x batch_num matrix out corresponding to reward associated with each action
+  max_next_qs = tf.reduce_max(next_qs, axis=-1)             # we pick out the max rewards
+  target = rewards + (1. - dones) * discount * max_next_qs  # we take the current rewards and apply the reward equation to compute the new rewards
+  with tf.GradientTape() as tape:                           
+    qs = hp.main_nn(states)                                 # we take current state and forward propagate and pick most valuable actions
+    action_masks = tf.one_hot(actions, num_actions)         # one_hot converts from actions of the form [-1,1,1,-1...] to [[1,0],[0,1],[0,1]] essentally mapping actions with degree n to lists of length n
+    masked_qs = tf.reduce_sum(action_masks * qs, axis=-1)   # we multiply and sum across rows
+    loss = mse(target, masked_qs)                           # we compute mse between two entities
+    grads = tape.gradient(loss, hp.main_nn.trainable_variables) # now we find the gradient descent on the loss function with trainnable variables being modified
+    optimizer.apply_gradients(zip(grads, hp.main_nn.trainable_variables)) # we apply the gradients
+    return loss
 
 def select_epsilon_greedy_action(state, hp):
   """Take random action with probability epsilon, else take best action."""
@@ -126,19 +126,19 @@ def main():
   # Start training. Play game once and then train with a batch.
   last_100_ep_rewards = []
   for episode in range(num_episodes+1):
-    state = np.array(env.reset()[0])
-    ep_reward, done = 0, False
+    state = np.array(env.reset()[0])                          # this is a default state
+    ep_reward, done = 0, False                                
     while not done:
-      state_in = tf.expand_dims(state, axis=0)
-      action = select_epsilon_greedy_action(state_in, hp)
+      state_in = tf.expand_dims(state, axis=0)                # I add a dimension here to make it a 1 x 4 from ,4
+      action = select_epsilon_greedy_action(state_in, hp)     # we select an action based on epsilon criteria
       next_state, reward, done, _ , _  = env.step(action)
-      ep_reward += (reward - abs(next_state[0])/5.0)
+      ep_reward += (reward - abs(next_state[0])/5.0)          # we reward based on time spent with upright stick and how close it was to the middle
       # Save to experience replay.
-      buffer.add(state, action, ep_reward, next_state, done)
+      buffer.add(state, action, ep_reward, next_state, done)  # we save the state and the chose action reward and the next state we find ourselves in
       state = next_state
       cur_frame += 1
       # Copy main_nn weights to target_nn.
-      if cur_frame % 2000 == 0:
+      if cur_frame % 10000 == 0: # once we collect enough new data we
         hp.target_nn.set_weights(hp.main_nn.get_weights())
 
       # Train neural network.

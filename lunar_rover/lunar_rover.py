@@ -1,25 +1,32 @@
-
-
-# # # SETTING UP NN STUFF
-num_actions = 8 # accelertion in the range -2,-1,0,1,2 and omega in the range -.02, -.01, 0, .01, .02 => this values map to action values 0-4 and 0-4
-num_states = 8 # speed, acceleration, omega, and 5 distances in front of the car: -60 degrees, -30 degrees, 0 degrees, 30 degrees, 60 degrees
-# # # 
+# The example followed here came from https://markelsanz14.medium.com/introduction-to-reinforcement-learning-part-3-q-learning-with-neural-networks-algorithm-dqn-1e22ee928ecd
+# 
+# 
+# The state space of the cart is: [x pos of vart, x velocity of cart, angle of bar, angular vel of bar]
+import gym
 from collections import deque
 import tensorflow as tf
 from tensorflow import keras
 import numpy as np
 import os
 import matplotlib.pyplot as plt
-from car_model import * 
-from algorithmdevel import *
+import bisect
+
+env = gym.make('CartPole-v0', render_mode="human")
+num_features = env.observation_space.shape[0]
+num_actions = env.action_space.n
+print('Number of state features: {}'.format(num_features))
+print('Number of possible actions: {}'.format(num_actions))
+
 # we are setting up a manual model in order to explicitly defien the feed forward/backward steps
+@tf.keras.utils.register_keras_serializable('my_package')
 class DQN(tf.keras.Model):
   """Dense neural network class."""
-  def __init__(self):
+  def __init__(self, **kwargs):
     super(DQN, self).__init__()
     self.dense1 = tf.keras.layers.Dense(128, activation="relu")
     self.dense2 = tf.keras.layers.Dense(128, activation="relu")
     self.dense3 = tf.keras.layers.Dense(num_actions, dtype=tf.float32) # No activation
+    
   def call(self, x):
     """Forward pass."""
     x = self.dense1(x)
@@ -27,18 +34,24 @@ class DQN(tf.keras.Model):
     return self.dense3(x)
 
 class HyperParams():
-  main_nn = DQN()
-  target_nn = DQN()
-  if 0: # set to 0 if you want to load fresh weights. WRANING, the saved weights will be overwritten
-    main_nn.load_weights('dqn_racecar.weights.h5')
-    target_nn.load_weights('dqn_racecar.weights.h5')
+  use_saved_model = True # note that new data will be saved only when we don't use a saved model
+  save_weights = not use_saved_model
+  model_name = 'cart_balancing_model_128_128_m.keras'  
+  num_iters = 10000
+  epslion_convergence_steps = 1000
+  epsilon_min = .1 # the minimum epsilon that system will use after epslion_convergence_steps sim runs
+  if use_saved_model: # set to 0 if you want to load fresh weights. WRANING, the saved weights will be overwritten
+    main_nn = tf.keras.models.load_model(model_name)
+    target_nn = tf.keras.models.load_model(model_name)
     # print("Saved weights loaded")
     epsilon = .1
     epsilon_step = 0
   else:
+    main_nn = DQN()
+    target_nn = DQN()
     print("Using random weights")
-    epsilon = 1
-    epsilon_step = .0009
+    epsilon = 1.0
+    epsilon_step = (epsilon-epsilon_min)/epslion_convergence_steps
   batch_size = 128
 
 optimizer = tf.keras.optimizers.Adam(1e-4)
@@ -49,9 +62,10 @@ class ReplayBuffer(object):
   def __init__(self, size):
     self.buffer = deque(maxlen=size)
 
-  def add(self, states, actions, rewards, next_states, dones):
-    for i in range(len(states)):
-      self.buffer.append((states[i], actions[i], rewards[i], next_states[i], dones[i]))
+  def add(self, state, action, reward, next_state, done):
+    #q = bisect.bisect_right(self.buffer,reward, key=lambda x: x[2])
+    #self.buffer.insert(q, (state, action, reward, next_state, done))
+    self.buffer.append((state, action, reward, next_state, done))
 
   def __len__(self):
     return len(self.buffer)
@@ -59,6 +73,7 @@ class ReplayBuffer(object):
   def sample(self, num_samples):
     states, actions, rewards, next_states, dones = [], [], [], [], []
     idx = np.random.choice(len(self.buffer), num_samples)
+    #idx = [len(self.buffer) - i for i in range(1, num_samples+1)]
     for i in idx:
       elem = self.buffer[i]
       state, action, reward, next_state, done = elem
@@ -66,7 +81,9 @@ class ReplayBuffer(object):
       actions.append(np.array(action, copy=False))
       rewards.append(reward)
       next_states.append(np.array(next_state, copy=False))
-      dones.append(done)
+      dones.append(done)      
+    # plt.plot(rewards)
+    # plt.show()
     states = np.array(states)
     actions = np.array(actions)
     rewards = np.array(rewards, dtype=np.float32)
@@ -97,37 +114,28 @@ def select_epsilon_greedy_action(state, hp):
   """Take random action with probability epsilon, else take best action."""
   result = tf.random.uniform((1,))
   if result < hp.epsilon:
-    return [np.random.randint(0,5),np.random.randint(0,5)]
+    return env.action_space.sample() # Random action (left or right).
   else:
-    sample = hp.main_nn(state)[0]
-    return [tf.argmax(sample[:5]).numpy(),tf.argmax(sample[5:]).numpy()] # Greedy action for state.
+    return tf.argmax(hp.main_nn(state)[0]).numpy() # Greedy action for state.
 
-def main():
-  num_episodes = 1000    
+def main():  
   buffer = ReplayBuffer(100000)
   cur_frame = 0
   hp = HyperParams()
-  rt = RaceTrack(10) # add 10 cars
-  rt.reset_carrender()
-  #print([[car.pos_x, car.pos_y] for car in rt.cars])
+  num_episodes = hp.num_iters
   # Start training. Play game once and then train with a batch.
   last_100_ep_rewards = []
   for episode in range(num_episodes+1):
-    dones, ep_rewards, states = rt.extract_states()
-    while sum(dones)==0: # train continuously
-
-      plt.imshow(rt.carrender)
-      plt.draw()
-      plt.pause(0.1)
-      plt.clf()
-
-      state_in = [tf.expand_dims(state, axis=0) for state in states]
-      actions = [select_epsilon_greedy_action(state, hp) for state in state_in]
-      dones, rewards, next_states = rt.forward_sim(actions)
-      ep_rewards = [rewards[i] + ep_rewards[i] +  next_states[i][0] for i in range(len(rt.cars))] # we are adding time spent without collision + velocity as reward
+    state = np.array(env.reset()[0])
+    ep_reward, done = 0, False
+    while not done:
+      state_in = tf.expand_dims(state, axis=0)
+      action = select_epsilon_greedy_action(state_in, hp)
+      next_state, reward, done, _ , _  = env.step(action)
+      ep_reward += (reward - abs(next_state[0])/5.0)
       # Save to experience replay.
-      buffer.add(states, actions, ep_rewards, next_states, dones)
-      states = next_states
+      buffer.add(state, action, ep_reward, next_state, done)
+      state = next_state
       cur_frame += 1
       # Copy main_nn weights to target_nn.
       if cur_frame % 2000 == 0:
@@ -138,17 +146,20 @@ def main():
         states, actions, rewards, next_states, dones = buffer.sample(hp.batch_size)
         loss = train_step(states, actions, rewards, next_states, dones, hp)
     
-    if episode < 950: 
+    if hp.epsilon>hp.epsilon_min:
       hp.epsilon -= hp.epsilon_step
 
     if len(last_100_ep_rewards) == 100:
       last_100_ep_rewards = last_100_ep_rewards[1:]
-    last_100_ep_rewards.append(extract_list(ep_rewards, dones))
+    last_100_ep_rewards.append(ep_reward)
       
     if episode % 50 == 0 and episode>0:
       print(f'Episode {episode}/{num_episodes}. Epsilon: {hp.epsilon:.3f}. '
             f'Reward in last 100 episodes: {np.mean(last_100_ep_rewards):.3f}')
-      hp.main_nn.save_weights(os.path.join(os.getcwd(), 'dqn_example_original.weights.h5'))
+      if hp.save_weights:
+        hp.main_nn.save(os.path.join(os.getcwd(), hp.model_name))
+  env.close()
+
 
 if __name__ == '__main__':
   main()

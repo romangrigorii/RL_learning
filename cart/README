@@ -1,0 +1,9 @@
+cart_balancing_model_128_128_   : holds weight for the original uncosntraiend problem with NN layer sizes of 128 + 128
+cart_balancing_model_128_128_m  : holds weight for the problem of balancing the pole and staying at the center
+cart_balancing_model_128_128_m  : holds weight for the problem of balancing the pole, staying at the center, and being as energetically efficient as possible
+cart_balancing_model_128_128_v  : was trained without target NN - only the main NN was used and similar results were achieved
+
+cart_balancing_model_16_16_16_m : same as above but layers are 16 + 16 + 16
+cart_balancing_model_32_32      : same as above but lyers are 32 + 32 
+
+
