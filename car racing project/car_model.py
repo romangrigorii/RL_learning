@@ -1,15 +1,14 @@
-# # in this module we will attempt to get a car to follow a racetrack
+# # In this module we model a car and a racetrack
 # # available actions = turn left, turn_right, accelerate, decelarate.
-# # simultion will work at 20ms intervals, 20ms = 1 sim
-# # We can at maximum turn .02 radians in 1 sim -> 1 radian/s -> .02/sim
-# # Speed is locked between 0 and 500 pixels/s -> 10pixels/sim which is roughtly 110 mph
-# # we can add/subtract at maximum 2 pixels from our velocity in a simulation loop, which corresponds to 100 pixels/s change
+# # simultion will work at 20ms intervals, 20ms = 1 sim step
+# # We can, at most turn .02 radians in 1 sim -> 1 radian/s -> .02/sim
 # # 10 pixels = 1m
+# # Speed is locked between 0 and 500 pixels/s -> 10 pixels/sim which is roughtly 110 mph
+# # we can add/subtract at maximum 2 pixels from our velocity in a simulation loop, which corresponds to 100 pixels/s change
 # # avaialble states = distance to the wall in front of the car at 60 degrees, 30 degrees, 0 degrees, -30 degrees, -60 degrees
 # # avalable actions : acceleration -> -2 -1 0 1 2  omega: -.02 .01 0 .01 .02  (10 actions total)
-# # on the racerack, cars will be mapped with -1, the allowed track will be marked as 0, and walls of the track wll be marked with a 1
+# # on the racerack, cars will be mapped with -1, the race track will be marked as 0, and walls of the track wll be marked with a 1
 
-possible_actions = [-2, -1, 0, 1, 2, -.02, -.01, 0.0, .01, .02]
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.image as img
@@ -22,15 +21,15 @@ else:
   raceTrack = np.matrix([[2 if q[0]>.5 and q[1] < .5 and q[2]< .5 else 1 if q[0] == 0 and q[1] == 0 and q[2] == 0 else 0 for q in c] for c in image])
 
 (Ymax, Xmax) = raceTrack.shape
-print(Ymax, Xmax)
+print("The shape of ractrack is: ", Ymax, Xmax)
 
-d_theta = [-np.pi/3, -np.pi/6, 0.0, np.pi/6, np.pi/3]
+d_theta = [-np.pi/2, -np.pi/4, 0.0, np.pi/4, np.pi/2]
 class Car:
   # note that car kinematics are tied to the center of the car
   def __init__(self):
     self.car_width = 15 # 1.5m 
     self.car_length = 27 # 2.7m
-    self.pos_x = 92
+    self.pos_x = 90
     self.pos_y = 195
     self.speed = 0
     self.acc = 0
@@ -39,10 +38,17 @@ class Car:
     self.collided = False
     self.distances = [0]*5
     # static
-    self.dt = 0.5
+    self.car_angle = 0
+    self.car_angle_old = 0
+    self.car_angle_diff = 0
+
+    self.dt = 0.1
     self.top_speed = 500 # pixels per second
     self.top_acc = 20 # pixels per second per second. can be +-
     self.top_omega = 1 # radian per second
+
+    self.possible_actions = [-100, -50, 0, 50, 100, -5, -2.5, 0.0, 2.5, 5] # these are scaled for dt = .02 - needs rescaling for different dt
+    self.possible_actions = [q*self.dt for q in self.possible_actions[:5]] + self.possible_actions[5:]
 
     def sample_randomly(self):
       return (np.random.rand - .5)*self.top_acc*2, (np.random.rand - .5)*self.omega*2
@@ -50,7 +56,8 @@ class Car:
 class RaceTrack(Car):
   def __init__(self, num_cars = 1):
     self.racetrack = raceTrack
-    self.carrender = np.zeros(np.shape(raceTrack))
+    self.racetrack_size = np.shape(raceTrack)
+    self.carrender = np.zeros(self.racetrack_size)
     self.num_cars = num_cars
     self.cars = [Car() for q in range(num_cars)]
     
@@ -65,6 +72,10 @@ class RaceTrack(Car):
     self.cars[idx].__init__()
   
   def position_car(self, idx):
+    '''
+    This will draw a car on the racetrack template. I don't think it's the best version - can be improved.
+    It wil lalso return colided flag as True if there is a collision detected
+    '''
     car = self.cars[idx]
     for x in range(-car.car_width//2, car.car_width//2+1):
       for y in range(-car.car_length//2, car.car_length//2+1):
@@ -78,6 +89,9 @@ class RaceTrack(Car):
     return car.collided
 
   def compute_distances(self):
+    '''
+    This will compute the 5 distances between the car and the reacetrack wall
+    '''
     distances = [[0]*5 for q in range(len(self.cars))]    
     for i, car in enumerate(self.cars):
         x, y = car.pos_x, car.pos_y
@@ -93,7 +107,8 @@ class RaceTrack(Car):
 
   def extract_states(self):
     dones = [0]*len(self.cars)
-    reward = [1]*len(self.cars)
+    reward = [q.car_angle_diff for q in self.cars]
+    # print(reward)
     for i, b in enumerate([self.position_car(i) for i in range(len(self.cars))]):
       if b: 
         self.reset_car(i)
@@ -105,16 +120,21 @@ class RaceTrack(Car):
 
   def forward_sim_states(self, actions): # delta state is new acceleration and new angular velocity
     for i, car in enumerate(self.cars):
-      car.omega = possible_actions[5 + actions[i][1]]
+      car.omega = car.possible_actions[5 + actions[i][1]]
       if car.omega>car.top_omega: car.omega = car.top_omega
       if car.omega<-car.top_omega: car.omega = -car.top_omega
       car.theta += car.dt * car.omega
-      car.acc = possible_actions[actions[i][0]]
+      car.acc = car.possible_actions[actions[i][0]]
       if car.acc > car.top_acc: car.acc = car.top_acc
       if car.acc < -car.top_acc: car.acc = -car.top_acc
       car.speed += car.acc*car.dt
       car.pos_x += car.speed*car.dt*np.cos(car.theta)
       car.pos_y += car.speed*car.dt*np.sin(car.theta)
+      #print(car.pos_y)
+      car.car_angle_old = car.car_angle
+      car.car_angle = np.arctan2(self.racetrack_size[0]/2-car.pos_y, car.pos_x - self.racetrack_size[1]/2)
+      car.car_angle_diff = car.car_angle - car.car_angle_old
+      # car.car_angle_diff = car.car_angle_diff*(car.car_angle_diff>0)
 
   def forward_sim(self, actions):
       self.reset_carrender()
@@ -122,10 +142,14 @@ class RaceTrack(Car):
       return self.extract_states()
 
 if __name__ == "__main__":
-  rt = RaceTrack(10) # add 10 cars
+  rt = RaceTrack(1) # add 10 cars
+  states = [[0]*10 for i in range(len(rt.cars))]
   while 1:
-    states = rt.forward_sim([[4, 0] for q in range(len(rt.cars))]) # the car is acceleratig
-    print(states, '\n')
+    trn = [min(max(int((s[7]-s[3])/20),-2), 2)+2 for s in states]
+    print(states)
+    print([q.car_angle for q in rt.cars])
+    states = rt.forward_sim([[4 if states[q][0]<100 else 2, trn[q]] for q in range(len(rt.cars))])[2] # the car is accelerating
+    #print(states, '\n')
     plt.imshow(rt.carrender)
     plt.draw()
     plt.pause(0.1)

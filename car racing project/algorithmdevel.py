@@ -1,3 +1,6 @@
+import numpy as np
+from itertools import compress
+
 def distance_estimate(d):
     q_tot = 0
     q_d = 128
@@ -20,11 +23,13 @@ def distance_estimate(d):
 print(distance_estimate(95))
 
 
+a = [1,2,3,4,5]
+b = [0,0,0,1,0]
+
 def extract_list(a,b):
     out = []
     for i, q in enumerate(b):
         if q!=0: out.append(a[i])
     return out
 
-print(extract_list([1,2,3,4,5], [0,0,0,1,0]))
-        
+print(list(compress(a, b)))
