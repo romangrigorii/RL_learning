@@ -10,14 +10,21 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 import bisect
+from gym.wrappers import RecordVideo, RecordEpisodeStatistics, TimeLimit
 
-env = gym.make('CartPole-v0', render_mode="human")
+save_video = False # set whether we want to save or watch video
+if save_video:
+  env = gym.make('CartPole-v1', render_mode="rgb_array")  
+  env = RecordVideo(env, video_folder = './videos', episode_trigger = lambda x: x%100 == 0) # this is a wrapper function that will save episodes to a video
+else:
+  env = gym.make('CartPole-v1', render_mode="human")
+env = TimeLimit(env, max_episode_steps=400)
 num_features = env.observation_space.shape[0]
 num_actions = env.action_space.n
 print('Number of state features: {}'.format(num_features))
 print('Number of possible actions: {}'.format(num_actions))
 
-# we are setting up a manual model in order to explicitly defien the feed forward/backward steps
+# we are setting up a manual model in order to explicitly define the feed forward/backward steps
 @tf.keras.utils.register_keras_serializable('my_package')
 class DQN(tf.keras.Model):
   """Dense neural network class."""
@@ -35,21 +42,21 @@ class DQN(tf.keras.Model):
 
 class HyperParams():
   use_saved_model = True # note that new data will be saved only when we don't use a saved model
-  save_weights = True # not use_saved_model
-  model_name = 'cart_balancing_model_128_128_q.keras'  
+  save_weights = False # overwrite weights of the model
+  model_name = 'cart_balancing_model_128_128_.keras'  
   num_iters = 10000
   epslion_convergence_steps = 1000
   epsilon_min = .1 # the minimum epsilon that system will use after epslion_convergence_steps sim runs
   if use_saved_model: # set to 0 if you want to load fresh weights. WRANING, the saved weights will be overwritten
     main_nn = tf.keras.models.load_model(model_name)
     target_nn = tf.keras.models.load_model(model_name)
-    # print("Saved weights loaded")
+    print("Saved weights loaded")
     epsilon = .1
     epsilon_step = 0
   else:
     main_nn = DQN()
     target_nn = DQN()
-    print("Using random weights")
+    print("Intiialized with random weights")
     epsilon = 1.0
     epsilon_step = (epsilon-epsilon_min)/epslion_convergence_steps
   batch_size = 128
@@ -63,8 +70,6 @@ class ReplayBuffer(object):
     self.buffer = deque(maxlen=size)
 
   def add(self, state, action, reward, next_state, done):
-    # q = bisect.bisect_right(self.buffer,reward, key=lambda x: x[2])
-    # self.buffer.insert(q, (state, action, reward, next_state, done))
     self.buffer.append((state, action, reward, next_state, done)) # add a tuple of data to the buffer 
 
   def __len__(self):
@@ -73,7 +78,6 @@ class ReplayBuffer(object):
   def sample(self, num_samples):
     states, actions, rewards, next_states, dones = [], [], [], [], []
     idx = np.random.choice(len(self.buffer), num_samples)
-    #idx = [len(self.buffer) - i for i in range(1, num_samples+1)]
     for i in idx:
       elem = self.buffer[i]
       state, action, reward, next_state, done = elem
@@ -82,8 +86,6 @@ class ReplayBuffer(object):
       rewards.append(reward)
       next_states.append(np.array(next_state, copy=False))
       dones.append(done)      
-    # plt.plot(rewards)
-    # plt.show()
     states = np.array(states)
     actions = np.array(actions)
     rewards = np.array(rewards, dtype=np.float32)
@@ -98,7 +100,7 @@ def train_step(states, actions, rewards, next_states, dones, hp):
   """Perform a training iteration on a batch of data sampled from the experience
   replay buffer."""
   # Calculate targets.
-  next_qs = hp.target_nn(next_states)                       # get the 2 x batch_num matrix out corresponding to reward associated with each action
+  next_qs = hp.target_nn(next_states)                       # get the num_actions x batch_num matrix out corresponding to reward associated with each action
   max_next_qs = tf.reduce_max(next_qs, axis=-1)             # we pick out the max rewards
   target = rewards + (1. - dones) * discount * max_next_qs  # we take the current rewards and apply the reward equation to compute the new rewards
   with tf.GradientTape() as tape:                           
@@ -118,6 +120,10 @@ def select_epsilon_greedy_action(state, hp):
   else:
     return tf.argmax(hp.main_nn(state)[0]).numpy() # Greedy action for state.
 
+def polyak_averaging(hp):
+  print(hp.target_nn.get_weights())
+  hp.target_nn.set_weights(hp.main_nn.get_weights()*.01 + hp.target_nn.get_weights()*.99)
+
 def main():  
   buffer = ReplayBuffer(100000)
   cur_frame = 0
@@ -125,21 +131,27 @@ def main():
   num_episodes = hp.num_iters
   # Start training. Play game once and then train with a batch.
   last_100_ep_rewards = []
+  env.reset()
+  if save_video: env.start_video_recorder()
   for episode in range(num_episodes+1):
-    state = np.array(env.reset()[0])                          # this is a default state
+    state = np.array(env.reset()[0])   
+                        # this is a default state
     ep_reward, done = 0, False                                
     while not done:
-      state_in = tf.expand_dims(state, axis=0)                # I add a dimension here to make it a 1 x 4 from ,4
+      state_in = tf.expand_dims(state, axis=0)                # Add a dimension here to make it a 1,N from ,N
       action = select_epsilon_greedy_action(state_in, hp)     # we select an action based on epsilon criteria
       next_state, reward, done, _ , _  = env.step(action)
-      ep_reward += (reward - abs(next_state[0])/5.0)          # we reward based on time spent with upright stick and how close it was to the middle
+      ep_reward += reward - abs(next_state[0])          # we reward based on time spent with upright stick and how close it was to the middle of the map
       # Save to experience replay.
       buffer.add(state, action, ep_reward, next_state, done)  # we save the state and the chose action reward and the next state we find ourselves in
       state = next_state
       cur_frame += 1
-      # Copy main_nn weights to target_nn.
-      if cur_frame % 10000 == 0: # once we collect enough new data we
+
+      # use copying or avegraging of weights
+      if cur_frame % 10000 == 0: # once we collect enough new data we copy main_nn weights to target_nn.
         hp.target_nn.set_weights(hp.main_nn.get_weights())
+      # if cur_frame % 1000:
+      #   polyak_averaging(hp)
 
       # Train neural network.
       if len(buffer) >= hp.batch_size:
@@ -158,8 +170,8 @@ def main():
             f'Reward in last 100 episodes: {np.mean(last_100_ep_rewards):.3f}')
       if hp.save_weights:
         hp.main_nn.save(os.path.join(os.getcwd(), hp.model_name))
-  env.close()
-
+  if save_video: env.close_video_recorder()
+  else: env.close()
 
 if __name__ == '__main__':
   main()
